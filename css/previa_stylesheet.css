@@ -84,3 +84,7 @@ header a {
     height: 100vh;
     overflow: hidden;
 }
+
+.text{
+    font-size: 18px;
+}
