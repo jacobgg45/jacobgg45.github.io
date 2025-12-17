@@ -1,12 +1,11 @@
 body{
-    margin: 0px;
-    font-family: Arial, Helvetica, sans-serif;
+    margin: 0px;    overflow-x: hidden;    font-family: Arial, Helvetica, sans-serif;
     color: #000000;
-    background-color: #ffffff;
+    background-color: #fffae8;
 }
 
 header {
-    background-color: #ffffff;
+    background-color: #fffae8;
     color: #000000;
     padding: 12px 16px;
     display: flex;
@@ -17,7 +16,11 @@ header {
 }
 
 .title-text{
-    padding: 50px;
+    padding-bottom: 10px;
+    padding-top: 30px;
+    font-size: 90px;
+    font-weight: 700;
+    text-shadow: 0px 4px 4px rgba(0, 0, 0, 0.25);
 }
 
 header a {
@@ -42,7 +45,7 @@ header a {
 }
 
 .main-content{
-    padding: 10px;
+    padding: 25px;
     font-size: 20px;
 }
 
@@ -55,4 +58,29 @@ header a {
 .centered-image {
     width: 100%;
     display: block;
+}
+
+.drift-button {
+    display: inline-block;
+    margin: 20px auto;
+    padding: 1px 20px;
+    background-color: rgb(201, 125, 125);
+    color: rgb(0, 0, 0);
+    border: none;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    width: 160px;
+    text-align: center;
+}
+.drift-button:hover {
+    background-color: rgb(188, 96, 96);
+}
+
+.tableauWrapper{
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
 }

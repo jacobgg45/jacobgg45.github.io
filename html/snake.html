@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <header>
+        <a href="../index.html">Home</a> |
+        <!-- <span class="header-user">| </span> -->
+        <a href="previa.html">Back to Previa</a>
+    </header>
+    <title>Single-Player Slither</title>
+    <style>
+        :root { color-scheme: light; }
+        body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #0b1020; color: #e8ecff; }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+        .topbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+        .panel { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 12px; }
+        .stats { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+        .btn {
+            appearance: none; border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.08); color: #e8ecff;
+            padding: 8px 12px; border-radius: 10px; cursor: pointer;
+        }
+        .btn:hover { background: rgba(255,255,255,0.12); }
+        .hint { opacity: 0.85; font-size: 0.95rem; }
+        canvas { width: 100%; height: auto; display: block; border-radius: 14px; background: #070a14; border: 1px solid rgba(255,255,255,0.12); }
+        .row { display: grid; gap: 12px; grid-template-columns: 1fr; margin-top: 12px; }
+        .small { font-size: 0.9rem; opacity: 0.85; }
+        .toggle { display: inline-flex; gap: 8px; align-items: center; }
+        input[type="range"] { width: 160px; }
+        @media (min-width: 860px) {
+            .row { grid-template-columns: 2fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="topbar panel">
+            <div>
+                <div style="font-weight:700; font-size:1.2rem;">Single-Player Slither</div>
+                <div class="small">Move with mouse/touch. Eat pellets to grow. Avoid walls and yourself.</div>
+            </div>
+            <div class="stats">
+                <div>Score: <span id="score">0</span></div>
+                <div>Best: <span id="best">0</span></div>
+                <button class="btn" id="restartBtn">Restart</button>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="panel">
+                <canvas id="game" width="960" height="540"></canvas>
+                <div class="hint" style="margin-top:10px;">
+                    Controls: aim your head toward the cursor. Hold <b>Space</b> to boost (burns length).
+                </div>
+            </div>
+
+            <div class="panel">
+                <div style="font-weight:700; margin-bottom:10px;">Settings</div>
+
+                <div class="toggle" style="margin-bottom:10px;">
+                    <label for="speed">Base speed</label>
+                    <input id="speed" type="range" min="70" max="180" value="110" />
+                    <span id="speedVal" class="small"></span>
+                </div>
+
+                <div class="toggle" style="margin-bottom:10px;">
+                    <label for="density">Pellet density</label>
+                    <input id="density" type="range" min="30" max="140" value="80" />
+                    <span id="densityVal" class="small"></span>
+                </div>
+
+                <div class="toggle" style="margin-bottom:10px;">
+                    <input id="wrap" type="checkbox" />
+                    <label for="wrap">Wrap edges (no wall death)</label>
+                </div>
+
+                <div class="small">
+                    Tip: If you want it easier, turn on wrapping and lower speed.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== Canvas + UI =====
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
+
+        const scoreEl = document.getElementById("score");
+        const bestEl = document.getElementById("best");
+        const restartBtn = document.getElementById("restartBtn");
+
+        const speedSlider = document.getElementById("speed");
+        const densitySlider = document.getElementById("density");
+        const wrapChk = document.getElementById("wrap");
+        const speedVal = document.getElementById("speedVal");
+        const densityVal = document.getElementById("densityVal");
+
+        const BEST_KEY = "single_slither_best";
+        let best = Number(localStorage.getItem(BEST_KEY) || 0);
+        bestEl.textContent = best;
+
+        function updateLabels() {
+            speedVal.textContent = (Number(speedSlider.value) / 100).toFixed(2) + "x";
+            densityVal.textContent = densitySlider.value;
+        }
+        updateLabels();
+        speedSlider.addEventListener("input", updateLabels);
+        densitySlider.addEventListener("input", updateLabels);
+
+        // ===== Game constants =====
+        const W = canvas.width, H = canvas.height;
+        const RAND = (a,b)=> a + Math.random()*(b-a);
+
+        // Snake is a chain of points with constant spacing (smooth "slither")
+        const snake = {
+            pts: [],
+            spacing: 6,
+            radius: 10,
+            lenTarget: 90, // number of points target (grows)
+            head: { x: W/2, y: H/2 },
+            angle: 0
+        };
+
+        // Target direction (mouse/touch)
+        const aim = { x: W/2 + 100, y: H/2 };
+
+        // Food pellets
+        let pellets = [];
+        function pelletCountTarget() {
+            return Number(densitySlider.value);
+        }
+        function spawnPellet() {
+            pellets.push({
+                x: RAND(20, W-20),
+                y: RAND(20, H-20),
+                r: RAND(3, 6),
+                val: 1
+            });
+        }
+
+        // Boost
+        let boosting = false;
+
+        // State
+        let score = 0;
+        let dead = false;
+
+        function resetGame() {
+            dead = false;
+            score = 0;
+            scoreEl.textContent = score;
+
+            snake.head.x = W/2; snake.head.y = H/2;
+            snake.angle = 0;
+            snake.pts = [];
+            snake.lenTarget = 90;
+
+            // initialize points behind head
+            for (let i=0;i<snake.lenTarget;i++){
+                snake.pts.push({ x: snake.head.x - i*snake.spacing, y: snake.head.y });
+            }
+
+            pellets = [];
+            for (let i=0; i<pelletCountTarget(); i++) spawnPellet();
+        }
+
+        restartBtn.addEventListener("click", resetGame);
+
+        // ===== Input =====
+        function setAimFromEvent(e) {
+            const rect = canvas.getBoundingClientRect();
+            const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+            aim.x = cx; aim.y = cy;
+        }
+        canvas.addEventListener("mousemove", setAimFromEvent);
+        canvas.addEventListener("touchstart", (e)=>{ setAimFromEvent(e.touches[0]); }, {passive:true});
+        canvas.addEventListener("touchmove", (e)=>{ setAimFromEvent(e.touches[0]); }, {passive:true});
+
+        window.addEventListener("keydown", (e)=>{
+            if (e.code === "Space") boosting = true;
+            if (dead && (e.code === "Enter" || e.code === "Space")) resetGame();
+        });
+        window.addEventListener("keyup", (e)=>{
+            if (e.code === "Space") boosting = false;
+        });
+
+        // ===== Helpers =====
+        function dist2(ax, ay, bx, by) {
+            const dx = ax-bx, dy = ay-by;
+            return dx*dx + dy*dy;
+        }
+
+        function wrapOrDie() {
+            if (wrapChk.checked) {
+                if (snake.head.x < 0) snake.head.x += W;
+                if (snake.head.x > W) snake.head.x -= W;
+                if (snake.head.y < 0) snake.head.y += H;
+                if (snake.head.y > H) snake.head.y -= H;
+            } else {
+                const r = snake.radius;
+                if (snake.head.x < r || snake.head.x > W-r || snake.head.y < r || snake.head.y > H-r) {
+                    die();
+                }
+            }
+        }
+
+        function die() {
+            if (dead) return;
+            dead = true;
+            if (score > best) {
+                best = score;
+                localStorage.setItem(BEST_KEY, String(best));
+                bestEl.textContent = best;
+            }
+        }
+
+        // ===== Update loop =====
+        let lastT = performance.now();
+
+        function tick(t) {
+            const dt = Math.min(0.033, (t - lastT) / 1000); // clamp
+            lastT = t;
+
+            // keep pellet population stable
+            while (pellets.length < pelletCountTarget()) spawnPellet();
+            while (pellets.length > pelletCountTarget()) pellets.pop();
+
+            if (!dead) update(dt);
+            render();
+
+            requestAnimationFrame(tick);
+        }
+
+        function update(dt) {
+            // Aim angle
+            const dx = aim.x - snake.head.x;
+            const dy = aim.y - snake.head.y;
+            const targetAng = Math.atan2(dy, dx);
+
+            // Smooth turning
+            let dAng = targetAng - snake.angle;
+            dAng = Math.atan2(Math.sin(dAng), Math.cos(dAng)); // wrap to [-pi, pi]
+            snake.angle += dAng * Math.min(1, dt * 8);
+
+            // Speed
+            const base = Number(speedSlider.value);
+            let speed = (base * 2.2) * dt; // pixels per frame
+            if (boosting && snake.lenTarget > 40) {
+                speed *= 1.75;
+                // burn length slowly
+                snake.lenTarget -= dt * 12;
+            }
+
+            // Move head
+            snake.head.x += Math.cos(snake.angle) * speed;
+            snake.head.y += Math.sin(snake.angle) * speed;
+
+            wrapOrDie();
+
+            // Add new head point
+            snake.pts.unshift({ x: snake.head.x, y: snake.head.y });
+
+            // Enforce spacing along body (smooth slither)
+            for (let i = 1; i < snake.pts.length; i++) {
+                const p = snake.pts[i-1];
+                const q = snake.pts[i];
+                const ddx = q.x - p.x;
+                const ddy = q.y - p.y;
+                const d = Math.hypot(ddx, ddy) || 0.0001;
+                const desired = snake.spacing;
+                if (d > desired) {
+                    const pull = (d - desired) / d;
+                    q.x -= ddx * pull;
+                    q.y -= ddy * pull;
+                }
+            }
+
+            // Trim to target length
+            const targetCount = Math.max(20, Math.floor(snake.lenTarget));
+            while (snake.pts.length > targetCount) snake.pts.pop();
+
+            // Eat pellets
+            const eatR = snake.radius + 4;
+            const eatR2 = eatR * eatR;
+            for (let i = pellets.length - 1; i >= 0; i--) {
+                const f = pellets[i];
+                if (dist2(snake.head.x, snake.head.y, f.x, f.y) <= (eatR + f.r) * (eatR + f.r)) {
+                    pellets.splice(i, 1);
+                    score += 1;
+                    scoreEl.textContent = score;
+                    snake.lenTarget += 6; // grow
+                }
+            }
+
+            // Self-collision (skip near head)
+            const r2 = (snake.radius * 0.85) ** 2;
+            for (let i = 18; i < snake.pts.length; i++) {
+                const p = snake.pts[i];
+                if (dist2(snake.head.x, snake.head.y, p.x, p.y) < r2) {
+                    die();
+                    break;
+                }
+            }
+        }
+
+        // ===== Render =====
+        function render() {
+            ctx.clearRect(0, 0, W, H);
+
+            // background grid dots
+            ctx.globalAlpha = 0.25;
+            for (let y = 0; y < H; y += 36) {
+                for (let x = 0; x < W; x += 36) {
+                    ctx.beginPath();
+                    ctx.arc(x + 18, y + 18, 1.2, 0, Math.PI * 2);
+                    ctx.fillStyle = "#9fb3ff";
+                    ctx.fill();
+                }
+            }
+            ctx.globalAlpha = 1;
+
+            // pellets
+            for (const f of pellets) {
+                ctx.beginPath();
+                ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+                ctx.fillStyle = "#ffd27a";
+                ctx.fill();
+            }
+
+            // snake body
+            // draw from tail to head for nicer overlap
+            for (let i = snake.pts.length - 1; i >= 0; i--) {
+                const p = snake.pts[i];
+                const t = i / snake.pts.length;
+                const r = snake.radius * (0.55 + 0.45 * (1 - t));
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = "#7ee3ff";
+                ctx.fill();
+            }
+
+            // eyes on head
+            const hx = snake.head.x, hy = snake.head.y;
+            const ex = Math.cos(snake.angle), ey = Math.sin(snake.angle);
+            const px = -ey, py = ex;
+            const eyeOff = snake.radius * 0.45;
+            const eyeFwd = snake.radius * 0.35;
+
+            ctx.beginPath();
+            ctx.arc(hx + px*eyeOff + ex*eyeFwd, hy + py*eyeOff + ey*eyeFwd, 2.6, 0, Math.PI*2);
+            ctx.arc(hx - px*eyeOff + ex*eyeFwd, hy - py*eyeOff + ey*eyeFwd, 2.6, 0, Math.PI*2);
+            ctx.fillStyle = "#051026";
+            ctx.fill();
+
+            // death overlay
+            if (dead) {
+                ctx.fillStyle = "rgba(0,0,0,0.55)";
+                ctx.fillRect(0,0,W,H);
+                ctx.fillStyle = "#e8ecff";
+                ctx.textAlign = "center";
+                ctx.font = "700 34px system-ui, Arial";
+                ctx.fillText("Game Over", W/2, H/2 - 16);
+                ctx.font = "16px system-ui, Arial";
+                ctx.fillText("Press Enter (or click Restart) to play again", W/2, H/2 + 18);
+            }
+        }
+
+        resetGame();
+        requestAnimationFrame(tick);
+    </script>
+</body>
+</html>
